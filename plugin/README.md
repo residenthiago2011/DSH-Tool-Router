@@ -1,4 +1,4 @@
-# @residenthiago/dsh-tool-router
+# DeepSeek Harness - Tool Router
 
 Lazy tool discovery for [DeepSeek Harness](https://github.com/tonyd2wild/DeepSeek-Harness):
 hides every tool schema from the model's prefill and reveals exactly one tool
