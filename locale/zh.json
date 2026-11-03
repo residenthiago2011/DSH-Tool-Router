@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "工具路由",
+    "description": "预填充中不携带任何工具 schema；find_tool 通过决策模型按需逐个发现工具。"
+  }
+}

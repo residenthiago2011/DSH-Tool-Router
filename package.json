@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-tool-router",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "description": "Lazy tool discovery: hides every tool schema from prefill and reveals one through a decision-model choice on demand.",
   "license": "MIT",
@@ -9,8 +9,20 @@
     "description": "Zero tool schemas in prefill; discovers one tool per turn through a decision model API endpoint."
   },
   "exports": {
-    ".": "./index.js"
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon.svg": "./icon.svg"
   },
+  "files": [
+    "index.js",
+    "README.md",
+    "cordis.patch.yml",
+    "tool-registry.json",
+    "icon.svg",
+    "locale/en.json",
+    "locale/zh.json"
+  ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

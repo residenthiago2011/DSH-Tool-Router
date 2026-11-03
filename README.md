@@ -109,6 +109,11 @@ dsh plugin --profile <profile> add /path/to/dsh-tool-router.tgz
 Then select the bundle on the Plugins page (installation enables it by
 default) and restart DSH if the profile runs without HMR.
 
+**Plugins panel (1.2.0+):** the package ships panel metadata
+(`locale/en.json` + `locale/zh.json`, `icon.svg`, and the matching `exports`
+entries), so it renders as the **Tool Router** card with a description and an
+icon under your own bundles instead of a bare package name.
+
 ## Uninstall
 
 Deselect/remove the bundle on the Plugins page. The preset row and the host

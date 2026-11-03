@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Tool Router",
+    "description": "Zero tool schemas in prefill; find_tool reveals one tool at a time through a decision model."
+  }
+}
