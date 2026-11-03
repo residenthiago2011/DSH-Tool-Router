@@ -45,7 +45,7 @@
 
           # The router registers find_tool and hides everything else.
           - id: dsh-tool-router
-            name: '@local/dsh-tool-router'
+            name: '@residenthiago/dsh-tool-router'
 
     # The profile ships no host row for `present` — insert it so the preset
     # needs to mount nothing. Enabled by default (no `disabled` key).
