@@ -1,4 +1,4 @@
-# DSH Tool Router
+# DeepSeek Harness - Tool Router
 
 Lazy tool discovery for DSH: hides every tool schema from the model's prefill
 and reveals exactly one tool on demand through a **decision model API**.
