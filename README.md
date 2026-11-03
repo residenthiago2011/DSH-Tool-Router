@@ -57,7 +57,7 @@ half of the shelf is exactly what a default profile charges for from word one.
 
 ## What the bundle patch declares
 
-`cordis.patch.yml` (applied when the bundle is selected):
+`plugin/cordis.patch.yml` (applied when the bundle is selected):
 
 1. **`preset-no-prefill`** — an agent preset whose composition is only
    `persona` + `dsh-tool-router`. The persona tells the model: no tools are
@@ -79,28 +79,32 @@ half of the shelf is exactly what a default profile charges for from word one.
   `0.1.1-rc.2`; verified against `0.2.1-rc.3`.
 - A running **decision model API** that speaks `POST /v1/systemone`
   (the router defaults to `http://127.0.0.1:8081/v1/systemone`; edit
-  `ROUTER_BASE` in `index.js` to point at another host or port).
+  `ROUTER_BASE` in `plugin/index.js` to point at another host or port).
 - `pnpm` on PATH of the host running DSH (the plugin manager installs
   through pnpm; the CLI forwards pnpm arguments).
 
 ## Install
 
-**From GitHub (recommended):** Plugins → install → spec
+The npm package lives in [`plugin/`](plugin); the repository root holds the
+docs and the test suites.
 
-```
-git+https://github.com/residenthiago2011/DSH-Tool-Router.git
-```
-
-or via the CLI:
+**From npm (recommended):**
 
 ```sh
-dsh plugin --profile <profile> add git+https://github.com/residenthiago2011/DSH-Tool-Router.git
+dsh plugin --profile <profile> add @residenthiago/dsh-tool-router
+```
+
+**From a local checkout** (the package is a subdirectory, so point at it
+directly — npm cannot install a git URL whose `package.json` is not at the
+repository root):
+
+```sh
+dsh plugin --profile <profile> add link:/absolute/path/to/DSH-Tool-Router/plugin
 ```
 
 **From a prebuilt tarball:** download
 [`dsh-tool-router.tgz`](https://github.com/residenthiago2011/DSH-Tool-Router/releases/latest/download/dsh-tool-router.tgz)
-from Releases, then install from the local path (also accepted: absolute
-path, git URL, or an npm registry name after publishing):
+from Releases, then install from the local path:
 
 ```sh
 dsh plugin --profile <profile> add /path/to/dsh-tool-router.tgz
@@ -123,20 +127,32 @@ tool flips vanish with the bundle patch; other presets are untouched.
 
 | File | Purpose |
 |---|---|
-| `index.js` | The router plugin: registers `find_tool`, masks every other tool per agent, runs the 3-stage decision. |
-| `cordis.patch.yml` | The bundle patch: preset declaration + host tool enablement. |
-| `tool-registry.json` | Stage-0 labels and Stage-1 criteria (25 tools, both shells incl. `bash`). |
-| `router-import-test.mjs`, `rank-sim.mjs`, `router-e2e-test.mjs`, `restrict-scope-test.mjs`, `router-storm-test.mjs` | The five test suites (see [Tests](#tests)). |
+| `plugin/index.js` | The router plugin: registers `find_tool`, masks every other tool per agent, runs the 3-stage decision. |
+| `plugin/cordis.patch.yml` | The bundle patch: preset declaration + host tool enablement. |
+| `plugin/tool-registry.json` | Stage-0 labels and Stage-1 criteria (25 tools, both shells incl. `bash`). |
+| `plugin/test/router-import-test.mjs`, `plugin/test/rank-sim.mjs`, `plugin/test/router-e2e-test.mjs`, `plugin/test/restrict-scope-test.mjs`, `plugin/test/router-storm-test.mjs` | The five test suites (see [Tests](#tests)). |
 
 ## Tests
 
+From the package directory (`plugin/`):
+
 ```sh
-node router-import-test.mjs    # module shape (no dependencies)
-node rank-sim.mjs              # Stage-0 ranking on sample queries (needs tool-registry.json)
-node router-e2e-test.mjs       # full flow: arm/deny-set/live reveal — needs the decision endpoint at 127.0.0.1:8081
-node restrict-scope-test.mjs   # deny-set vs the global registry (agent-scoped + empty-deny cases)
-node router-storm-test.mjs     # mask lifecycle, no endpoint: no tools/change listener, step-boundary reconcile
+npm test               # import shape, ranking sim, deny-set, storm lifecycle
+npm run test:e2e       # full flow: arm/deny-set/live reveal — needs the decision endpoint at 127.0.0.1:8081
 ```
+
+Or run the suites individually from `plugin/`:
+
+```sh
+node test/router-import-test.mjs    # module shape (no dependencies)
+node test/rank-sim.mjs              # Stage-0 ranking on sample queries (needs tool-registry.json)
+node test/router-e2e-test.mjs       # full flow: arm/deny-set/live reveal — needs the decision endpoint at 127.0.0.1:8081
+node test/restrict-scope-test.mjs   # deny-set vs the global registry (agent-scoped + empty-deny cases)
+node test/router-storm-test.mjs     # mask lifecycle, no endpoint: no tools/change listener, step-boundary reconcile
+```
+
+`npm test` runs the four endpoint-free suites; `router-e2e-test.mjs` needs a
+live decision endpoint and is kept behind `npm run test:e2e`.
 
 `router-e2e-test.mjs` uses a stub DSH context that emits `tools/change`
 synchronously (the worst case that once caused a ~970x feedback loop), then
@@ -170,7 +186,7 @@ without a registry write.
   author-style parameters reaches the LLM unconstrained — the model then
   calls with `{}`. Always compile.
 - The empty-request catalog hint and the exact-name fast path exist for
-  small models; see `execute()` in `index.js`.
+  small models; see `execute()` in `plugin/index.js`.
 - Diagnostics go to stderr and are mirrored to `~/.dsh/tool-router.log`
   (`DSH_TOOL_ROUTER_LOG` overrides the path, `DSH_TOOL_ROUTER_LOG=0` disables
   the mirror). The mirror needs `~/.dsh` to exist — where it does not, the same

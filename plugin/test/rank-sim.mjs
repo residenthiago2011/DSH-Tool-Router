@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-const raw = JSON.parse(readFileSync(new URL('./tool-registry.json', import.meta.url), 'utf8'));
+const raw = JSON.parse(readFileSync(new URL('../tool-registry.json', import.meta.url), 'utf8'));
 const list = Array.isArray(raw) ? raw : (raw.tools ?? []);
 const LABELS = {};
 for (const e of list) if (e && e.name) LABELS[e.name] = e;

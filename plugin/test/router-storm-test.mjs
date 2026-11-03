@@ -106,7 +106,7 @@ const ctx = {
   get(name) { return name === 'sessions' ? sessionsService : undefined; },
 };
 
-const mod = await import('./index.js');
+const mod = await import('../index.js');
 assert(typeof mod.apply === 'function', 'module exports apply');
 const disposePlugin = mod.apply(ctx);
 

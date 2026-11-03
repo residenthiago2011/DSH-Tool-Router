@@ -6,9 +6,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/residenthiago2011/DSH-Tool-Router.git"
+    "url": "git+https://github.com/residenthiago2011/DSH-Tool-Router.git",
+    "directory": "plugin"
   },
-  "homepage": "https://github.com/residenthiago2011/DSH-Tool-Router#readme",
+  "homepage": "https://github.com/residenthiago2011/DSH-Tool-Router/tree/main/plugin#readme",
   "bugs": {
     "url": "https://github.com/residenthiago2011/DSH-Tool-Router/issues"
   },
@@ -25,12 +26,20 @@
   "files": [
     "index.js",
     "README.md",
+    "LICENSE",
     "cordis.patch.yml",
     "tool-registry.json",
     "icon.svg",
     "locale/en.json",
     "locale/zh.json"
   ],
+  "scripts": {
+    "test": "node test/router-import-test.mjs && node test/rank-sim.mjs && node test/restrict-scope-test.mjs && node test/router-storm-test.mjs",
+    "test:e2e": "node test/router-e2e-test.mjs"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
   "publishConfig": {
     "access": "public"
   },

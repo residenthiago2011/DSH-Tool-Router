@@ -15,7 +15,7 @@
 //             accepts restrict({deny:[]}) as a silent no-op, so an empty deny
 //             reaching restrict() would report "armed mask hiding 0 tool(s)"
 //             and stop the retry loop with nothing masked.
-import { apply } from "./index.js";
+import { apply } from "../index.js";
 
 const params = { type: "object", properties: { request: { type: "string" } }, required: ["request"] };
 const failures = [];

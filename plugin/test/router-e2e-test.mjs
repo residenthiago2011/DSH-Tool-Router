@@ -91,7 +91,7 @@ const ctx = {
   tools: toolsService,
 };
 
-const mod = await import('./index.js');
+const mod = await import('../index.js');
 assert(typeof mod.apply === 'function', 'module exports apply');
 mod.apply(ctx);
 assert(registry.has('find_tool'), 'find_tool registered at mount');
