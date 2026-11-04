@@ -107,13 +107,13 @@ tag on the [Releases page](https://github.com/residenthiago2011/DSH-Tool-Router/
 then either paste the tarball URL into the panel (**Plugins → Add plugin**):
 
 ```text
-https://github.com/residenthiago2011/DSH-Tool-Router/releases/download/v1.2.0/residenthiago-dsh-tool-router-1.2.0.tgz
+https://github.com/residenthiago2011/DSH-Tool-Router/releases/download/v1.3.0/residenthiago-dsh-tool-router-1.3.0.tgz
 ```
 
 or download it and install from the local path:
 
 ```sh
-dsh plugin --profile <profile> add /path/to/residenthiago-dsh-tool-router-1.2.0.tgz
+dsh plugin --profile <profile> add /path/to/residenthiago-dsh-tool-router-1.3.0.tgz
 ```
 
 Then select the bundle on the Plugins page (installation enables it by
@@ -139,14 +139,14 @@ use `dsh plugin --profile <profile> remove @residenthiago/dsh-tool-router`.
 | `plugin/index.js` | The router plugin: registers `find_tool`, masks every other tool per agent, runs the 3-stage decision. |
 | `plugin/cordis.patch.yml` | The bundle patch: preset declaration + host tool enablement. |
 | `plugin/tool-registry.json` | Stage-0 labels and Stage-1 criteria (25 tools, both shells incl. `bash`). |
-| `plugin/test/router-import-test.mjs`, `plugin/test/rank-sim.mjs`, `plugin/test/router-e2e-test.mjs`, `plugin/test/restrict-scope-test.mjs`, `plugin/test/router-storm-test.mjs` | The five test suites (see [Tests](#tests)). |
+| `plugin/test/router-import-test.mjs`, `plugin/test/rank-sim.mjs`, `plugin/test/router-e2e-test.mjs`, `plugin/test/restrict-scope-test.mjs`, `plugin/test/router-storm-test.mjs`, `plugin/test/midstep-defer-test.mjs` | The six test suites (see [Tests](#tests)). |
 
 ## Tests
 
 From the package directory (`plugin/`):
 
 ```sh
-npm test               # import shape, ranking sim, deny-set, storm lifecycle
+npm test               # import shape, ranking sim, deny-set, storm lifecycle, boundary deferral
 npm run test:e2e       # full flow: arm/deny-set/live reveal — needs the decision endpoint at 127.0.0.1:8081
 ```
 
@@ -158,9 +158,10 @@ node test/rank-sim.mjs              # Stage-0 ranking on sample queries (needs t
 node test/router-e2e-test.mjs       # full flow: arm/deny-set/live reveal — needs the decision endpoint at 127.0.0.1:8081
 node test/restrict-scope-test.mjs   # deny-set vs the global registry (agent-scoped + empty-deny cases)
 node test/router-storm-test.mjs     # mask lifecycle, no endpoint: no tools/change listener, step-boundary reconcile
+node test/midstep-defer-test.mjs    # 1.3.0 boundary rule: boot-adopt, parked hide, seed during the window
 ```
 
-`npm test` runs the four endpoint-free suites; `router-e2e-test.mjs` needs a
+`npm test` runs the five endpoint-free suites; `router-e2e-test.mjs` needs a
 live decision endpoint and is kept behind `npm run test:e2e`.
 
 `router-e2e-test.mjs` uses a stub DSH context that emits `tools/change`
@@ -187,6 +188,14 @@ mounted is adopted at its first step boundary; (3) a re-mount rebuilds
 `revealed` from the session log, so tools the conversation already used are not
 hidden again, and asking for one of them answers `already_available: true`
 without a registry write.
+
+`midstep-defer-test.mjs` needs no endpoint. It pins the 1.3.0 consistency rule
+for the f631c7b5 incident: a mount-time scan arms every live agent before the
+first `assemble()`; an agent adopted **while its turn is open** parks its first
+hide until `step/end`, so during that step advertised == callable (no
+`unknown tool` on a tool the header promised); a tool called during that
+un-masked window survives the parked arm via the log seed; and reveals still
+re-arm immediately mid-turn.
 
 ## Notes
 
@@ -257,6 +266,45 @@ visible, and a seeded tool asked for again makes **no** registry write — measu
 ## An agent that predates the plugin
 
 `agent/created` does not fire for an agent that already exists when the plugin
-mounts (a live bundle enable, an HMR reload, a resumed session). `agent/pre-step`
-adopts such an agent on its first step; without that it stays untracked and never
-gets a mask — every schema stays in prefill, silently.
+mounts (a live bundle enable, an HMR reload, a resumed session). Two paths cover
+it: at mount, `apply()` scans `ctx.get('agents').list()` and adopts every live
+agent **immediately** (`boot-adopt: N/M pre-existing agent(s) masked at mount`),
+which is the path that matters — see the incident below; and `agent/pre-step`
+adopts any agent that still slipped through on its first step.
+
+## Arm between steps, never mid-step (incident f631c7b5, 2026-11-04)
+
+The host assembles the request's tool schemas **before** it runs
+`agent/pre-step` (`dsh-agent-loop` `preStep()`: `await systemPrompt.assemble(...)`
+first, `dispatch.waterfall("agent/pre-step", ...)` second), while tool execution
+resolves names against the **restricted** view at call time. So any deny-write
+that lands after `assemble()` but before dispatch produces a request whose header
+advertises tools the registry already denies — and the model's first action dies
+with `Error: unknown tool "working_directory"` for a schema it was shown.
+
+Measured that night: the session's agent was resumed before the bundle applied,
+the pre-step self-heal was the first path to find it, and step 1 went out with
+all 13 tools in `request/header reason=initial` against an already-restricted
+registry — one wasted step, then the correct `[find_tool]`-only header from
+step 2 on (`reason=change` + the removal delta).
+
+The rule now enforced (and tested):
+
+1. **Mount-time adoption** arms live agents before any `assemble()` runs.
+2. **A hide (deny-set addition) may only be written at a host boundary that
+   precedes the next `assemble()`**: `turn/start`, `step/end`, `turn/end`.
+   An adoption or reconciliation that happens while its turn is open parks the
+   write (`deferring hide of N tool(s) ... to the next boundary`) instead of
+   arming mid-step. Advertised stays callable for that one step — the schemas
+   were sent anyway, so nothing extra costs prefill; the mask lands at the
+   boundary.
+3. **Reveals (deny-set removals) never defer** — they only widen visibility,
+   which is always consistent with what the header already advertised.
+4. **`revealed` is re-seeded from the session log on every `recompute()`**, so a
+   tool called during an un-masked window is folded into the parked arm instead
+   of being re-hidden (the `unknown tool` → `find_tool` → full-context retry
+   loop the 2026-10-28 incident burned 419,672 tokens on).
+
+The subscription set is back up to four events and still **not** `tools/change`:
+`agent/created`, `agent/pre-step`, `session/event` (boundaries, read-only), and
+`agent/disposed` (drops the record and its restriction with the agent).

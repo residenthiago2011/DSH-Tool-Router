@@ -32,6 +32,22 @@
  * hosts twice (incident note in apply()). Tools already revealed are re-armed as
  * visible, never re-hidden.
  *
+ * Which boundary (incident session f631c7b5, 2026-11-04): the host assembles
+ * the tool schemas BEFORE it runs `agent/pre-step` (`dsh-agent-loop`
+ * preStep(): `await systemPrompt.assemble(...)` first, then
+ * `dispatch.waterfall("agent/pre-step", ...)`), while tool EXECUTION resolves
+ * names against the RESTRICTED view at call time. An agent whose first mask is
+ * armed from a pre-step self-heal therefore published a request advertising all
+ * 12 tools against a registry that already denied them — the model's first
+ * action came back `Error: unknown tool "working_directory"`.
+ * Rule derived from that: anything that HIDES a tool (a deny-set addition) may
+ * only be written at a boundary the host runs BEFORE the next assemble() —
+ * `turn/start`, `step/end`, `turn/end` — while REVEALS (deny-set removals)
+ * stay immediate because they only widen visibility. An agent that already
+ * exists when this plugin mounts is adopted right at mount (boot-adopt), so on
+ * the common path the mask is armed before the first assemble() and nothing
+ * ever defers.
+ *
  * Diagnostics go to stderr (a host may capture it in a file such as
  * `service_direct.log`) and mirror to `~/.dsh/tool-router.log` unless
  * `DSH_TOOL_ROUTER_LOG=0`.
@@ -196,6 +212,13 @@ export function apply(ctx) {
   const byAgent = new Map();
   /** Pending mask-arming retries; cleared on dispose. */
   const timers = new Set();
+  /**
+   * Session ids with an OPEN TURN — filled from `session/event` only (every
+   * session, not just tracked agents) because an agent can be adopted after
+   * its `turn/start` already passed. Drives fix B: while this set holds the
+   * agent's id, recompute() may not apply deny-set additions (see below).
+   */
+  const openTurns = new Set();
 
   /**
    * Re-entrancy control for mask arming. DSH fires tools/change (and even
@@ -272,10 +295,18 @@ export function apply(ctx) {
     return [...found.values()];
   };
 
-  const recompute = (agent) => {
+  const recompute = (agent, opts = {}) => {
     const rec = byAgent.get(agent);
     if (!rec) return false;
     if (rec.arming) { pendingFlush = true; return false; } // in flight, deferred
+
+    // KEEP `revealed` IN SYNC WITH THE LOG on every pass (the session log is
+    // the only source of truth — see seedRevealed). It matters during the one
+    // step an un-masked window covers: a tool called there must not be
+    // re-hidden by the deferred arm that closes that window, or the model gets
+    // `unknown tool` for a schema it was never withdrawn — the exact
+    // find_tool -> full-context retry loop of the 2026-10-28 incident.
+    seedRevealed(agent, rec.revealed);
 
     const live = probe(agent);
 
@@ -320,6 +351,32 @@ export function apply(ctx) {
       // let every later-registered tool into prefill - signal pending instead.
       log(`agent ${short(agent)}: 0 tools to hide yet (armed=false)`);
       return false;
+    }
+
+    // MID-STEP SAFETY (fix B): a deny addition applied after this step's
+    // assemble() already ran would make dispatch deny a tool the model can SEE
+    // in this very request. While an open turn is live, park the write for the
+    // next host boundary (turn/start | step/end | turn/end — see onSessionEvent)
+    // and keep this request internally consistent: advertised = callable. A
+    // pure reveal (deny shrinks against an armed key) keeps re-arming
+    // immediately; it only widens visibility, which is always consistent.
+    if (!opts.boundary && openTurns.has(agent?.id)) {
+      deny.sort();
+      const nextKey = deny.join(',');
+      if (nextKey !== rec.key) {
+        const armedNow = new Set((rec.key ?? '').split(',').filter(Boolean));
+        const additions = deny.filter((n) => !armedNow.has(n));
+        if (additions.length > 0) {
+          rec.deferred = true;
+          if (rec.deferredKey !== nextKey) {
+            rec.deferredKey = nextKey;
+            log(`agent ${short(agent)}: deferring hide of ${additions.length} tool(s) `
+              + `(${additions.slice(0, 4).join(', ')}${additions.length > 4 ? ', ...' : ''}) `
+              + 'to the next boundary — this turn already carries them');
+          }
+          return false;
+        }
+      }
     }
 
     let armed = false;
@@ -373,6 +430,8 @@ export function apply(ctx) {
     }
     if (!armed) return false;
     rec.schemas = all;                         // grow-only
+    rec.deferred = false;                      // the intent is now applied
+    rec.deferredKey = '';
     log(`agent ${short(agent)}: armed mask hiding ${deny.length} tool(s); `
       + `revealed=${rec.revealed.size}`);
     return true;
@@ -399,9 +458,20 @@ export function apply(ctx) {
       if (!rec || rec.dispose) { if (rec) rec.retryScheduled = false; return; }
       rec.retryScheduled = false;
       if (recompute(agent)) return;
+      // fix B: a parked (deferred) write is waiting for its boundary; pumping
+      // it every 500 ms would only log the same defer and finally report
+      // "gave up arming mask" for a healthy plugin.
+      if (rec.deferred) return;
       scheduleRetry(agent, attempt + 1);
     }, 500);
     timers.add(t);
+  };
+
+  /** Whether an unsuccessful recompute still owes the 500 ms arm retry. */
+  const retryUnlessDeferred = (agent, ok) => {
+    if (ok) return false;
+    const rec = byAgent.get(agent);
+    return !(rec && rec.deferred);
   };
 
   /**
@@ -433,8 +503,12 @@ export function apply(ctx) {
    * plugin memory is a derived cache"（dsh-ops skills/.../practices.md 第 1 条）。
    * 所以按日志重建：本会话 `tool/call` 里出现过的工具，都算已揭示。
    */
-  const seedRevealed = (agent) => {
-    const revealed = new Set();
+  const seedRevealed = (agent, into) => {
+    // `into` (fix C): the live `rec.revealed` set, re-seeded on EVERY recompute
+    // so the log stays authoritative while the session runs — not only at
+    // adoption. Union semantics: a tool ever called in this session is revealed
+    // from then on and is never re-hidden.
+    const revealed = into ?? new Set();
     try {
       const sessions = typeof ctx.get === 'function' ? ctx.get('sessions') : undefined;
       const session = sessions?.get?.(agent?.id) ?? agent?.session;
@@ -490,10 +564,74 @@ export function apply(ctx) {
     // inherited tool set for this agent and is what gets masked.
     let globalView = -1;
     try { globalView = ctx.tools.schemas().length; } catch { /* ignore */ }
+    const deferred = !!byAgent.get(agent)?.deferred;
     log(`adopted ${short(agent)}: globalView=${globalView} `
-      + `agentSurface=${schemas.length} -> ${ok ? 'MASK ARMED' : 'PENDING'}`);
-    if (!ok) scheduleRetry(agent);
+      + `agentSurface=${schemas.length} -> ${ok ? 'MASK ARMED' : deferred ? 'DEFERRED to boundary' : 'PENDING'}`);
+    if (retryUnlessDeferred(agent, ok)) scheduleRetry(agent);
     return ok;
+  };
+
+  // ------------------------------------------------------------------------
+  // fix B — the boundary the host guarantees RELATIVE TO assemble():
+  //   turn/start — appended in turn() BEFORE preStep() assembles the tools,
+  //   step/end   — appended in the step's finally, after every dispatch,
+  //   turn/end   — appended in the turn's finally (covers rejected/no-step
+  //                turns, where no step/end ever fires).
+  // A hide parked by recompute() lands on the next one of these; anything else
+  // (notably agent/pre-step, which runs AFTER assemble()) would diverge the
+  // header from dispatch again — the f631c7b5 incident.
+  /** Apply a mask write that was parked while its turn was open. */
+  const flushDeferred = (agent) => {
+    const rec = byAgent.get(agent);
+    if (!rec || !rec.deferred) return;
+    rec.deferred = false;
+    rec.deferredKey = '';
+    let ok = false;
+    try {
+      ok = recompute(agent, { boundary: true });
+    } catch (e) {
+      log('deferred arm failed:', e?.message ?? e);
+      return;
+    }
+    if (retryUnlessDeferred(agent, ok)) scheduleRetry(agent);
+  };
+
+  /** Find the record whose agent belongs to this session log. */
+  const recFor = (session) => {
+    if (!session?.id) return undefined;
+    for (const [agent, rec] of byAgent) {
+      if (agent?.id === session.id) return rec;
+    }
+    return undefined;
+  };
+
+  const onSessionEvent = (session, event) => {
+    const type = event?.type;
+    if (type !== 'turn/start' && type !== 'step/end' && type !== 'turn/end') return;
+    if (!session?.id) return;
+    if (type === 'turn/start') openTurns.add(session.id);
+    const rec = recFor(session);
+    if (rec) {
+      if (type === 'turn/end') openTurns.delete(session.id);
+      flushDeferred(rec.agent);
+    } else if (type === 'turn/end') {
+      openTurns.delete(session.id);
+    }
+  };
+
+  /**
+   * An Agent whose `agent/created` this plugin instance never saw (the host
+   * resumed the session before the bundle applied, or the agent outlived a
+   * plugin reload) must release its record with the agent; leaving it would
+   * leak the agent and block a re-adopt of its successor.
+   */
+  const onDisposed = (payload) => {
+    const agent = payload?.agent ?? payload;
+    const rec = byAgent.get(agent);
+    if (!rec) return;
+    byAgent.delete(agent);
+    if (rec.dispose) { try { rec.dispose(); } catch { /* agent ctx already gone */ } }
+    log(`disposed ${short(agent)} (mask released)`);
   };
 
   const effect = ctx.effect(() => {
@@ -729,7 +867,10 @@ export function apply(ctx) {
           try { adopt(agent); } catch (e) { log('pre-step adopt failed:', e?.message ?? e); }
         }
         try {
-          if (byAgent.has(agent) && !recompute(agent)) scheduleRetry(agent);
+          if (byAgent.has(agent)) {
+            const ok = recompute(agent);
+            if (retryUnlessDeferred(agent, ok)) scheduleRetry(agent);
+          }
         } catch (e) {
           log('pre-step reconcile failed:', e?.message ?? e);
         }
@@ -738,14 +879,42 @@ export function apply(ctx) {
     };
     ctx.on('agent/pre-step', onPreStep);
     onChangeRef = null;   // no tools/change subscription exists any more
+    ctx.on('session/event', onSessionEvent);
+    ctx.on('agent/disposed', onDisposed);
 
-    log('subscribed to agent/created + agent/pre-step (NOT tools/change)');
+    // --- fix A: adopt agents that already exist when this plugin mounts ------
+    // Incident f631c7b5 (2026-11-04): the bundle applied AFTER the host had
+    // already resumed the session's Agent, so `agent/created` never reached
+    // onCreated. The pre-step self-heal did notice the agent — but only after
+    // assemble() had snapshotted that step's tool list, which is exactly the
+    // late arm fix B defers. Arming here keeps the common path BEFORE the
+    // first assemble() and turns the deferral into a rare safety net.
+    let bootAdopted = 0;
+    let bootSeen = 0;
+    if (typeof ctx.get === 'function') {
+      try {
+        for (const agent of (ctx.get('agents')?.list?.() ?? [])) {
+          bootSeen += 1;
+          if (byAgent.has(agent)) continue;
+          if (!agent?.ctx?.tools) { scheduleAdopt(agent); continue; }
+          if (adopt(agent)) bootAdopted += 1;
+        }
+      } catch (e) {
+        log('boot agent scan failed:', e?.message ?? e);
+      }
+    }
+    log(`boot-adopt: ${bootAdopted}/${bootSeen} pre-existing agent(s) masked at mount`);
+
+    log('subscribed to agent/created + agent/pre-step + session/event + agent/disposed (NOT tools/change)');
 
     return () => {
       try { ctx.off('agent/created', onCreated); } catch { /* disposed */ }
       try { ctx.off('agent/pre-step', onPreStep); } catch { /* disposed */ }
+      try { ctx.off('session/event', onSessionEvent); } catch { /* disposed */ }
+      try { ctx.off('agent/disposed', onDisposed); } catch { /* disposed */ }
       for (const t of timers) clearTimeout(t);
       timers.clear();
+      openTurns.clear();
       for (const rec of byAgent.values()) {
         if (rec.dispose) { try { rec.dispose(); } catch { /* noop */ } }
       }

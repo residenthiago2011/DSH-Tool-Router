@@ -19,7 +19,7 @@ DeepSeek Harness → **Plugins** → **Add plugin** → Registry: **Official npm
 registry** → paste:
 
 ```text
-https://github.com/residenthiago2011/DSH-Tool-Router/releases/download/v1.2.0/residenthiago-dsh-tool-router-1.2.0.tgz
+https://github.com/residenthiago2011/DSH-Tool-Router/releases/download/v1.3.0/residenthiago-dsh-tool-router-1.3.0.tgz
 ```
 
 Pick the newest tag from the
