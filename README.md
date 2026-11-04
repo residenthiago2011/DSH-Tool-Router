@@ -102,12 +102,18 @@ repository root):
 dsh plugin --profile <profile> add link:/absolute/path/to/DSH-Tool-Router/plugin
 ```
 
-**From a prebuilt tarball:** download
-[`dsh-tool-router.tgz`](https://github.com/residenthiago2011/DSH-Tool-Router/releases/latest/download/dsh-tool-router.tgz)
-from Releases, then install from the local path:
+**From a prebuilt tarball (plugin panel / GitHub Release):** pick the newest
+tag on the [Releases page](https://github.com/residenthiago2011/DSH-Tool-Router/releases),
+then either paste the tarball URL into the panel (**Plugins → Add plugin**):
+
+```text
+https://github.com/residenthiago2011/DSH-Tool-Router/releases/download/v1.2.0/residenthiago-dsh-tool-router-1.2.0.tgz
+```
+
+or download it and install from the local path:
 
 ```sh
-dsh plugin --profile <profile> add /path/to/dsh-tool-router.tgz
+dsh plugin --profile <profile> add /path/to/residenthiago-dsh-tool-router-1.2.0.tgz
 ```
 
 Then select the bundle on the Plugins page (installation enables it by
@@ -121,7 +127,10 @@ icon under your own bundles instead of a bare package name.
 ## Uninstall
 
 Deselect/remove the bundle on the Plugins page. The preset row and the host
-tool flips vanish with the bundle patch; other presets are untouched.
+tool flips vanish with the bundle patch; other presets are untouched. Note:
+with HMR disabled the panel refuses live uninstalls ("stop it and uninstall
+the package with `dsh plugin`") — either enable the `hmr` row temporarily or
+use `dsh plugin --profile <profile> remove @residenthiago/dsh-tool-router`.
 
 ## Files
 

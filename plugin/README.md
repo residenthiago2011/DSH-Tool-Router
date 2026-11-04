@@ -13,6 +13,23 @@ on demand through a **decision model API** (`POST /v1/systemone`).
 
 ## Install
 
+### From a GitHub Release (plugin panel / tarball URL)
+
+DeepSeek Harness → **Plugins** → **Add plugin** → Registry: **Official npm
+registry** → paste:
+
+```text
+https://github.com/residenthiago2011/DSH-Tool-Router/releases/download/v1.2.0/residenthiago-dsh-tool-router-1.2.0.tgz
+```
+
+Pick the newest tag from the
+[Releases page](https://github.com/residenthiago2011/DSH-Tool-Router/releases);
+each release also carries a `SHA256SUMS.txt` for `sha256sum -c`. To remove the
+plugin later, open its card → **Uninstall** (the profile must run with HMR
+enabled for the panel uninstall; otherwise use `dsh plugin remove`).
+
+### From a registry package
+
 ```sh
 dsh plugin --profile <profile> add @residenthiago/dsh-tool-router
 ```
