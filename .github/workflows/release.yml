@@ -1,0 +1,104 @@
+name: Release
+
+# Build the plugin package (npm pack from plugin/) and publish it to a
+# GitHub Release. Two ways to run:
+#
+#   1. Push a tag:            git tag v1.2.0 && git push origin v1.2.0
+#      → release tag is the pushed tag.
+#   2. Actions tab → Release → Run workflow (on main)
+#      → release tag is "v<version>" taken from plugin/package.json.
+#
+# The release carries:
+#   residenthiago-dsh-<name>-<version>.tgz   ← install this through the panel
+#   SHA256SUMS.txt
+#
+# Install a release from the panel: Plugins → Add plugin → paste the tarball
+# URL (see the release page). Or from a shell with the device pnpm wrapper:
+#   pnpm add https://github.com/<owner>/<repo>/releases/download/<tag>/<file>.tgz
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Read package metadata
+        id: meta
+        run: |
+          echo "version=$(node -p "require('./plugin/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "name=$(node -p "require('./plugin/package.json').name")" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        working-directory: plugin
+        continue-on-error: true # several tests hit the live network
+        run: npm test
+
+      - name: Pack
+        working-directory: plugin
+        run: |
+          mkdir -p ../dist
+          npm pack --pack-destination ../dist
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum ./*.tgz > SHA256SUMS.txt
+
+      - name: Release notes
+        working-directory: dist
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.meta.outputs.version) }}
+        run: |
+          tarball=$(ls ./*.tgz)
+          cat > RELEASE.md <<EOF
+          # ${{ steps.meta.outputs.name }} v${{ steps.meta.outputs.version }}
+
+          ## Install from the panel (DeepSeek Harness)
+
+          Plugins → Add plugin → Registry: **Official npm registry** → paste:
+
+          \`\`\`
+          https://github.com/$REPO/releases/download/$TAG/$tarball
+          \`\`\`
+
+          ## Install from a shell
+
+          \`\`\`
+          pnpm add https://github.com/$REPO/releases/download/$TAG/$tarball
+          \`\`\`
+
+          ## Verify
+
+          Download \`$tarball\` and \`SHA256SUMS.txt\` into one directory, then:
+
+          \`\`\`
+          sha256sum -c SHA256SUMS.txt
+          \`\`\`
+          EOF
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.meta.outputs.version) }}
+          name: ${{ steps.meta.outputs.name }} v${{ steps.meta.outputs.version }}
+          body_path: dist/RELEASE.md
+          files: |
+            dist/*.tgz
+            dist/SHA256SUMS.txt
+          fail_on_unmatched_files: true
