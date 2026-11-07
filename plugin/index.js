@@ -59,6 +59,23 @@ export const inject = ['tools'];
 //     b11609 + a d1-omni-600M-Q8_0 decision model)
 const ROUTER_BASE = 'http://127.0.0.1:8081';
 const ROUTER_PATH = '/v1/systemone';
+// Phase 2.1a — DSH_TOOL_ROUTER_URL overrides the endpoint (full /v1/systemone
+// URL or bare origin; the origin is derived for /health and /v1/models use).
+// An invalid value warns once and falls back: a bad env var must not break
+// routing. Read once at module load — the host process sees env at startup.
+const resolveRouter = (raw) => {
+  if (!raw) return { origin: ROUTER_BASE, systemone: ROUTER_BASE + ROUTER_PATH };
+  try {
+    const u = new URL(String(raw).trim());
+    const origin = `${u.protocol}//${u.host}`;
+    const path = !u.pathname || u.pathname === '/' ? ROUTER_PATH : u.pathname;
+    return { origin, systemone: origin + path };
+  } catch (e) {
+    console.error('[dsh-tool-router] invalid DSH_TOOL_ROUTER_URL, using default:', e?.message ?? e);
+    return { origin: ROUTER_BASE, systemone: ROUTER_BASE + ROUTER_PATH };
+  }
+};
+const ROUTER = resolveRouter(process.env.DSH_TOOL_ROUTER_URL);
 const CHOICE_INSTR = 'Best matching tool for the request.';
 // Asked for TELEMETRY ONLY. d1-omni's noul head proved unreliable in both
 // phrasings: the NOT form pinned pNone=0.841 on a bash-conf=1.000 match, the
@@ -179,7 +196,7 @@ async function askDecision(request, candidates, signal) {
     ? AbortSignal.any([signal, timeout].filter(Boolean))
     : timeout;
 
-  const res = await fetch(ROUTER_BASE + ROUTER_PATH, {
+  const res = await fetch(ROUTER.systemone, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body,
