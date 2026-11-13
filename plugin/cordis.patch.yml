@@ -47,6 +47,28 @@
           - id: dsh-tool-router
             name: '@residenthiago/dsh-tool-router'
 
+          # `/compact` and its backend. The fuller presets (standard/ptc/
+          # cordis/minimal) mount these in an isolated group; without the
+          # group the command's `compaction` inject can never resolve, so
+          # `/compact` never reaches the slash menu under this preset.
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
     # The profile ships no host row for `present` — insert it so the preset
     # needs to mount nothing. Enabled by default (no `disabled` key).
     - id: present
