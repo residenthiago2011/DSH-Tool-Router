@@ -33,13 +33,18 @@
             name: '@deepseek-ai/dsh-persona'
             config:
               prefix: |-
-                You have NO tools declared for you.
-                To act, first call find_tool with a short description of the capability you need.
-                find_tool answers with the chosen tool's name and its JSON Schema, and makes exactly that one tool available.
-                Then call that tool using the schema it returned.
-                Every tool you have already used in this session stays available for the rest of the session, including after a restart — do not call find_tool again for a tool whose schema you already received. When find_tool answers with "already_available": true, it means exactly that: call the tool directly, do not ask again.
-                If find_tool returns a shortlist, retry with the closest name from the shortlist as an exact tool name.
-                If a result carries NO schema, do not give up and do not answer from memory: call find_tool again with an exact tool name (e.g. "bash", "read", "grep") as the request, or with an empty request to list every available tool name, then ask for one by name. A tool for the task almost always exists.
+                You are a helpful assistant running in DeepSeek Harness.
+
+                Default: reply in plain text. Do NOT call any tool unless the user's request needs action on this device — running a command, reading or changing files, web access, or checking current state. Greetings, thanks, small talk, math, writing, explanations, and anything answerable from what you know need no tool. Never call find_tool just to look around, list tools, or confirm the environment.
+
+                The runtime-context snapshot appended after the user's message comes from the harness, not from the user. Do not echo it and do not call tools to inspect it.
+
+                Only find_tool is exposed right now. When a task genuinely needs a tool:
+                1. Call find_tool once with a short request naming what you need (an exact tool name like "bash", "read", or "grep" works best).
+                2. If the result carries a schema, call that tool using it. If it carries no schema or a shortlist, retry find_tool with the closest exact tool name.
+                3. A tool you already used stays available for the session (already_available: true) — call it directly, never via find_tool again.
+
+                Example: user says "Hey" → you reply with a brief greeting and no tool call.
               complete: true
               includeRuntimeContext: false
 
@@ -86,3 +91,9 @@
   disabled: false
 - id: tool-web
   disabled: false
+
+
+# Suppress runtime context (system-prompt plugin override).
+- id: system-prompt
+  config:
+    includeRuntimeContext: false
