@@ -76,15 +76,9 @@ const resolveRouter = (raw) => {
   }
 };
 const ROUTER = resolveRouter(process.env.DSH_TOOL_ROUTER_URL);
-const CHOICE_INSTR = 'Best matching tool for the request.';
-// Asked for TELEMETRY ONLY. d1-omni's noul head proved unreliable in both
-// phrasings: the NOT form pinned pNone=0.841 on a bash-conf=1.000 match, the
-// YES form answered 0.886 "unhandled" on a read-conf=0.99 match. Confidence
-// alone decided every recorded probe correctly (matched 0.72-1.00 revealed,
-// unmatched <=0.71 rejected), so the noul value is logged but never gates.
-const NOUL_INSTR = 'Is this request handled by any of the listed tools?';
-const MAX_CHOICES = 24;   // full-surface send; cap only for pathological mounts (d1 window = 16,384 tokens)
-const DESC_CHARS = 160;   // ~40 tokens/criterion; d1-omni has room for rich descriptions (was 56, an earlier tighter budget)
+// CHOICE_INSTR / NOUL_INSTR / MAX_CHOICES / DESC_CHARS / STATE_CHARS and the
+// Stage 0/1 pure logic moved to decision.js in Phase 2.1c (byte-identity with
+// test-fixtures/legacy-bodies.json is the guard).
 // Full-surface + rich-criteria calibration (2026-10-17 probes over the real
 // mounted surface): matched conf 0.72-1.00, unmatched <=0.71 (poem 0.246,
 // flight 0.165, translate 0.559). 0.85 bounced the 0.722 config-read match;
@@ -95,6 +89,7 @@ const FETCH_TIMEOUT_MS = 60000;
 const SELF = 'find_tool';
 
 /** Terse labels for Stage-1 criteria; schemas come from the live registry. */
+import { buildCandidates, buildDecisionBody } from './decision.js';
 import { readFileSync, appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -130,65 +125,13 @@ const log = (...a) => {
 
 const CANDIDATES = [...new Set([...Object.keys(LABELS), 'bash', 'present'])];
 
-const tokenise = (s) => String(s ?? '')
-  .toLowerCase()
-  .split(/[^a-z0-9_]+/)
-  .filter((t) => t.length > 1);
-
-// Function words that match almost every label ("to" scored todo_write +5 via
-// substring and pushed bash out of the candidate window).
-const STOPWORDS = new Set([
-  'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'your', 'are',
-  'but', 'not', 'can', 'all', 'any', 'use', 'via', 'how', 'what', 'when',
-  'need', 'make', 'some', 'please', 'just', 'also', 'then', 'than', 'will',
-  'would', 'should', 'could', 'been', 'being', 'does', 'done',
-]);
-
-/** Stage 0 — ordering for the full send; a bound only above MAX_CHOICES. */
-function rank(query, names) {
-  const terms = [...new Set(tokenise(query))]
-    .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
-  const scored = names.map((name) => {
-    const rec = LABELS[name] || {};
-    const hay = new Set(tokenise([
-      name, rec.short, (rec.router_labels || []).join(' '), rec.description,
-    ].join(' ')));
-    const nameTokens = new Set(tokenise(name));
-    let score = 0;
-    for (const t of terms) {
-      if (hay.has(t)) score += 1;
-      // Prefix match so "read" also scores read_image.
-      if ([...nameTokens].some((n) => n === t || n.startsWith(t))) score += 3;
-      if ((rec.router_labels || []).some((l) => l.toLowerCase().includes(t))) score += 2;
-    }
-    return { name, score };
-  });
-  scored.sort((a, b) => b.score - a.score);
-  return scored;
-}
+// tokenise / STOPWORDS / rank moved to decision.js (Phase 2.1c).
 
 /** Stage 1 — one bounded decision-model call carrying a choice AND a noul. */
 async function askDecision(request, candidates, signal) {
-  // No none_of_the_above here — it competes with the real tools.
-  const criteria = {};
-  for (const { name } of candidates) {
-    const rec = LABELS[name] || {};
-    // Rich criteria: d1-omni reads descriptions as the option definitions.
-    // e.g. bash's "checking processes" is exactly what a memory query needs.
-    criteria[name] = ((rec.description || '') || rec.short || name).slice(0, DESC_CHARS);
-  }
-
-  const body = JSON.stringify({
-    // d1-omni (llama.cpp): a bare STRING state calibrates the companion noul
-    // and the choice confidence; an earlier object form made unmatched
-    // requests score conf>=0.92 AND p(noul)<=0.02, so no threshold could ever
-    // reject them (measured: 0/13 zero-wrong-accept params with the object).
-    state: String(request).slice(0, 800),
-    questions: {
-      bestTool: { type: 'choice', instructions: CHOICE_INSTR, criteria },
-      usable: { type: 'noul', instructions: NOUL_INSTR },
-    },
-  });
+  // No none_of_the_above here — it competes with the real tools. Criteria,
+  // state cap and the string/object state form all live in decision.js.
+  const body = buildDecisionBody(request, candidates, LABELS);
 
   // Bound the call: ~12-14 s on-device; a dead endpoint must not hang a turn.
   const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
@@ -236,6 +179,73 @@ export function apply(ctx) {
    * agent's id, recompute() may not apply deny-set additions (see below).
    */
   const openTurns = new Set();
+
+  /** Normalise the several shapes `agentPreset` arrives in. */
+  const normPreset = (v) => {
+    if (typeof v === 'string') return v;
+    if (v && typeof v === 'object') {
+      for (const key of ['val', 'id', 'value', 'agentPreset', 'preset']) {
+        if (typeof v[key] === 'string') return v[key];
+      }
+      if (typeof v.get === 'function') {
+        try { return normPreset(v.get()); } catch { /* ignore */ }
+      }
+    }
+    return undefined;
+  };
+
+  /**
+   * Which preset an agent is actually running. This bundle is mounted only in
+   * `no-prefill`, but boot-adopt, the find_tool self-heal and the pre-step
+   * self-heal all reach agents without asking — and used to mask standard/ptc/
+   * cordis agents too (see standard-mode-preset-analysis.md). Gating at adopt(),
+   * the single choke point, covers both the event paths and the direct calls,
+   * even if scope routing loses the preset tag.
+   *
+   * Undefined means no host API could answer; mayMask() then keeps the legacy
+   * behaviour, since a host mounting this bundle has no reason to mount it
+   * outside no-prefill.
+   */
+  const composedPresetOf = (agent) => {
+    try {
+      if (typeof ctx.get === 'function') {
+        for (const name of ['agentPresets', 'agentPresetRegistry', 'agent-preset-registry']) {
+          let reg;
+          try { reg = ctx.get(name); } catch { continue; }
+          if (typeof reg?.composedPreset !== 'function') continue;
+          for (const arg of [agent?.ctx ?? agent, agent]) {
+            try {
+              const v = normPreset(reg.composedPreset(arg));
+              if (v) return v;
+            } catch { /* try the other signature */ }
+          }
+        }
+      }
+    } catch { /* older host without the registry */ }
+    try {
+      const sessions = typeof ctx.get === 'function' ? ctx.get('sessions') : undefined;
+      const session = sessions?.get?.(agent?.id) ?? agent?.session;
+      const v = normPreset(session?.agentPreset ?? agent?.agentPreset ?? agent?.preset);
+      if (v) return v;
+    } catch { /* ignore */ }
+    return undefined;
+  };
+
+  /** Only a no-prefill agent may receive the tool-hiding mask. */
+  const mayMask = (agent) => {
+    const preset = composedPresetOf(agent);
+    return preset === undefined || preset === 'no-prefill';
+  };
+
+  /** Lift the deny layer for one agent (preset switch, disposal, teardown). */
+  const release = (agent, reason) => {
+    const rec = byAgent.get(agent);
+    if (!rec) return false;
+    byAgent.delete(agent);
+    if (rec.dispose) { try { rec.dispose(); } catch { /* agent ctx already gone */ } }
+    log(`released mask for ${short(agent)} (${reason})`);
+    return true;
+  };
 
   /**
    * Re-entrancy control for mask arming. DSH fires tools/change (and even
@@ -501,6 +511,7 @@ export function apply(ctx) {
     const t = setTimeout(() => {
       timers.delete(t);
       if (byAgent.has(agent)) return;           // adopted meanwhile
+      if (!mayMask(agent)) return;              // switched away from no-prefill meanwhile
       if (agent?.ctx?.tools) { adopt(agent); return; }
       scheduleAdopt(agent, attempt + 1);
     }, 500);
@@ -557,6 +568,15 @@ export function apply(ctx) {
     const already = byAgent.has(agent);
     log(`adopt entry ${short(agent)}: ctx.tools=${ready} alreadyTracked=${already}`);
     if (!ready || already) return false;
+
+    // This bundle is mounted only in no-prefill. Boot-adopt, both self-heals and
+    // agent/created all funnel through here; without this gate a standard agent
+    // gets the no-prefill deny layer and loses 13 tools (including find_tool).
+    const preset = composedPresetOf(agent);
+    if (preset !== undefined && preset !== 'no-prefill') {
+      log(`adopt skipped ${short(agent)}: preset=${preset} is not no-prefill`);
+      return false;
+    }
 
     // Initial surface via tools.get(...), not tools.schemas(agent) — the latter
     // never returned on device. Empty here is normal: preset tool plugins mount
@@ -624,6 +644,16 @@ export function apply(ctx) {
 
   const onSessionEvent = (session, event) => {
     const type = event?.type;
+    if (type === 'agent-preset/selected') {
+      const newPreset = normPreset(
+        event?.data?.agentPreset ?? event?.agentPreset ?? event?.data?.preset ?? event?.preset,
+      );
+      if (newPreset !== undefined && newPreset !== 'no-prefill') {
+        const rec = recFor(session);
+        if (rec) release(rec.agent, `preset switched to ${newPreset}`);
+      }
+      return;
+    }
     if (type !== 'turn/start' && type !== 'step/end' && type !== 'turn/end') return;
     if (!session?.id) return;
     if (type === 'turn/start') openTurns.add(session.id);
@@ -644,11 +674,38 @@ export function apply(ctx) {
    */
   const onDisposed = (payload) => {
     const agent = payload?.agent ?? payload;
-    const rec = byAgent.get(agent);
-    if (!rec) return;
-    byAgent.delete(agent);
-    if (rec.dispose) { try { rec.dispose(); } catch { /* agent ctx already gone */ } }
-    log(`disposed ${short(agent)} (mask released)`);
+    release(agent, 'agent disposed');
+  };
+
+  /**
+   * A preset switch away from no-prefill must lift the deny layer. The registry
+   * emits `agent-preset/selected` with (sessionId, { agentPreset: id }); some
+   * versions append the same event to the session log instead — handled in
+   * onSessionEvent below. Without this, a session that opens as no-prefill
+   * (the profile's selectedDefault) and then switches to standard keeps the
+   * mask forever and the agent runs with 20 tools instead of 33.
+   */
+  const onPresetSelected = (first, second) => {
+    let sessionId = first;
+    let payload = second;
+    if (first && typeof first === 'object') {
+      payload = first;
+      sessionId = first.sessionId ?? first.session?.id ?? first.agent?.id;
+    }
+    const newPreset = normPreset(
+      payload && typeof payload === 'object'
+        ? (payload.agentPreset ?? payload.preset ?? payload.id)
+        : payload,
+    );
+    if (newPreset === undefined || newPreset === 'no-prefill') return;
+    const fromPayload = payload && typeof payload === 'object' ? payload.agent : undefined;
+    if (fromPayload) { release(fromPayload, `preset switched to ${newPreset}`); return; }
+    for (const agent of byAgent.keys()) {
+      if (agent?.id === sessionId) {
+        release(agent, `preset switched to ${newPreset}`);
+        break;
+      }
+    }
   };
 
   const effect = ctx.effect(() => {
@@ -757,9 +814,8 @@ export function apply(ctx) {
         }
 
         // Stage 0/1 — full-surface send: rank only ORDERs the batch; the cap
-        // bites only above MAX_CHOICES (pathological mounts).
-        const ranked = rank(request, names);
-        const candidates = ranked.slice(0, Math.max(2, Math.min(MAX_CHOICES, names.length)));
+        // bites only above MAX_CHOICES (pathological mounts). decision.js.
+        const candidates = buildCandidates(request, names, LABELS);
 
         let answer = null;
         let error = null;
@@ -898,6 +954,7 @@ export function apply(ctx) {
     onChangeRef = null;   // no tools/change subscription exists any more
     ctx.on('session/event', onSessionEvent);
     ctx.on('agent/disposed', onDisposed);
+    ctx.on('agent-preset/selected', onPresetSelected);
 
     // --- fix A: adopt agents that already exist when this plugin mounts ------
     // Incident f631c7b5 (2026-11-04): the bundle applied AFTER the host had
@@ -922,19 +979,19 @@ export function apply(ctx) {
     }
     log(`boot-adopt: ${bootAdopted}/${bootSeen} pre-existing agent(s) masked at mount`);
 
-    log('subscribed to agent/created + agent/pre-step + session/event + agent/disposed (NOT tools/change)');
+    log('subscribed to agent/created + agent/pre-step + session/event + agent/disposed '
+      + '+ agent-preset/selected (NOT tools/change)');
 
     return () => {
       try { ctx.off('agent/created', onCreated); } catch { /* disposed */ }
       try { ctx.off('agent/pre-step', onPreStep); } catch { /* disposed */ }
       try { ctx.off('session/event', onSessionEvent); } catch { /* disposed */ }
       try { ctx.off('agent/disposed', onDisposed); } catch { /* disposed */ }
+      try { ctx.off('agent-preset/selected', onPresetSelected); } catch { /* disposed */ }
       for (const t of timers) clearTimeout(t);
       timers.clear();
       openTurns.clear();
-      for (const rec of byAgent.values()) {
-        if (rec.dispose) { try { rec.dispose(); } catch { /* noop */ } }
-      }
+      for (const agent of [...byAgent.keys()]) release(agent, 'plugin teardown');
       byAgent.clear();
     };
   });

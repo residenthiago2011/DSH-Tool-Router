@@ -25,6 +25,8 @@
   },
   "files": [
     "index.js",
+    "decision.js",
+    "profiles.js",
     "README.md",
     "LICENSE",
     "cordis.patch.yml",
@@ -34,7 +36,7 @@
     "locale/zh.json"
   ],
   "scripts": {
-    "test": "node test/router-import-test.mjs && node test/rank-sim.mjs && node test/restrict-scope-test.mjs && node test/router-storm-test.mjs && node test/midstep-defer-test.mjs && node test/legacy-bodies-test.mjs",
+    "test": "node test/router-import-test.mjs && node test/rank-sim.mjs && node test/restrict-scope-test.mjs && node test/router-storm-test.mjs && node test/midstep-defer-test.mjs && node test/legacy-bodies-test.mjs && node test/preset-gate-test.mjs",
     "test:e2e": "node test/router-e2e-test.mjs"
   },
   "engines": {
