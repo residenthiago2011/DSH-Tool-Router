@@ -107,13 +107,13 @@ tag on the [Releases page](https://github.com/residenthiago2011/DSH-Tool-Router/
 then either paste the tarball URL into the panel (**Plugins → Add plugin**):
 
 ```text
-https://github.com/residenthiago2011/DSH-Tool-Router/releases/download/v1.3.0/residenthiago-dsh-tool-router-1.3.0.tgz
+https://github.com/residenthiago2011/DSH-Tool-Router/releases/download/v1.3.1/residenthiago-dsh-tool-router-1.3.1.tgz
 ```
 
 or download it and install from the local path:
 
 ```sh
-dsh plugin --profile <profile> add /path/to/residenthiago-dsh-tool-router-1.3.0.tgz
+dsh plugin --profile <profile> add /path/to/residenthiago-dsh-tool-router-1.3.1.tgz
 ```
 
 Then select the bundle on the Plugins page (installation enables it by
