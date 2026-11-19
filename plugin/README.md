@@ -10,6 +10,8 @@ on demand through a **decision model API** (`POST /v1/systemone`).
 - **Stage 2** — accept iff `confidence >= 0.70`; otherwise return a
   probability-ordered shortlist so the model can retry with an exact tool name.
   Exact tool-name requests skip the decision call and reveal instantly.
+- **Preset-scoped:** only `no-prefill` agents are masked; switching to another
+  preset releases the mask, so Standard sessions keep all their tools.
 
 ## Install
 
@@ -44,7 +46,9 @@ with the `no-prefill` agent preset, so it appears in the Plugins panel as the
 ## Configuration
 
 The decision-model endpoint defaults to `http://127.0.0.1:8081/v1/systemone`.
-Edit `ROUTER_BASE` in `index.js` to point at another host or port.
+Set `DSH_TOOL_ROUTER_URL` to a full `/v1/systemone` URL or a bare origin to use
+another host or port; no source edit is needed. An invalid value warns once and
+falls back to the default.
 
 ## License
 

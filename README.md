@@ -4,7 +4,9 @@ Lazy tool discovery for DSH: hides every tool schema from the model's prefill
 and reveals exactly one tool on demand through a **decision model API**.
 
 - **Prefill cost:** one small `find_tool` schema instead of every mounted tool
-  (26 schemas on a default Standard profile — see [Why?](#why)).
+  (26 schemas on a default Standard profile in the original measurement — see
+  [Why?](#why); that figure dates from DSH 0.2.1-rc.3 and has not been
+  re-measured on 0.2.2-rc.1, where the Standard surface is larger).
 - **Stage 0** — full-surface send: every mounted tool (≤ 24) carries a
   160-char criterion, ordered by a stopword-filtered lexical rank (the rank
   only bounds pathological mounts — d1-omni does not saturate as the choice
@@ -30,6 +32,9 @@ the DSH **Standard preset** (the platform default) versus this plugin's
 | Prefill tokens | **6,559** | **283** |
 | System prompt | 5,816 chars | 372 chars |
 | Tool schemas shipped up front | **26 schemas (21,417 B)** | 1 schema (697 B) |
+
+> Measured on DSH 0.2.1-rc.3. Treat these as an illustration of the cost model,
+> not a current benchmark of the Standard profile, which now mounts more tools.
 
 Standard makes the model ingest a 5.8k-character system prompt plus **every**
 mounted tool schema — 6,559 tokens — before it emits a single word, and pays
@@ -59,8 +64,10 @@ half of the shelf is exactly what a default profile charges for from word one.
 
 `plugin/cordis.patch.yml` (applied when the bundle is selected):
 
-1. **`preset-no-prefill`** — an agent preset whose composition is only
-   `persona` + `dsh-tool-router`. The persona tells the model: no tools are
+1. **`preset-no-prefill`** — an agent preset whose composition is `persona` +
+   `dsh-tool-router` plus a `compaction` group (`compaction-basic`,
+   `command-compact`, `tool-result-pruner` — mounted here because the
+   host-level compaction rows are disabled in 0.2.x). The persona tells the model: no tools are
    declared; call `find_tool` first — and if a result carries no schema,
    retry with an exact tool name or an empty request instead of giving up.
    It also states the reveal rule from PR #2: every tool already used in the
@@ -72,21 +79,24 @@ half of the shelf is exactly what a default profile charges for from word one.
    row inserted. Discovery needs the tools to exist somewhere; preset-scoped
    registrations shadow host ones, so other presets keep their own behavior.
    The slim preset keeps the Agent Presets page showing only `find_tool`.
+   The `system-prompt` row also sets `includeRuntimeContext: false` to keep the
+   runtime-context snapshot out of prefill.
 
 ## Prerequisites
 
 - DSH with the bundle mechanism (`dsh.bundle.patch`) — available since
-  `0.1.1-rc.2`; verified against `0.2.1-rc.3`.
-- A running **decision model API** that speaks `POST /v1/systemone`
-  (the router defaults to `http://127.0.0.1:8081/v1/systemone`; edit
-  `ROUTER_BASE` in `plugin/index.js` to point at another host or port).
+  `0.1.1-rc.2`; verified against `0.2.1-rc.3` and `0.2.2-rc.1`.
+- A running **decision model API** that speaks `POST /v1/systemone`. The router
+  defaults to `http://127.0.0.1:8081/v1/systemone`; set `DSH_TOOL_ROUTER_URL`
+  to a full `/v1/systemone` URL or a bare origin to override it — no source
+  edit is needed (an invalid value warns once and falls back to the default).
 - `pnpm` on PATH of the host running DSH (the plugin manager installs
   through pnpm; the CLI forwards pnpm arguments).
 
 ## Install
 
-The npm package lives in [`plugin/`](plugin); the repository root holds the
-docs and the test suites.
+The npm package lives in [`plugin/`](plugin); the test suites are in
+[`plugin/test/`](plugin/test), and the repository root holds the docs.
 
 **From npm (recommended):**
 
@@ -136,17 +146,19 @@ use `dsh plugin --profile <profile> remove @residenthiago/dsh-tool-router`.
 
 | File | Purpose |
 |---|---|
-| `plugin/index.js` | The router plugin: registers `find_tool`, masks every other tool per agent, runs the 3-stage decision. |
+| `plugin/index.js` | The router plugin: registers `find_tool`, masks tools only for `no-prefill` agents, releases the mask on a preset switch, and runs the 3-stage decision. |
+| `plugin/decision.js` | Pure Stage-0 ranking and Stage-1 request-body builder; imported by `index.js`. |
 | `plugin/cordis.patch.yml` | The bundle patch: preset declaration + host tool enablement. |
 | `plugin/tool-registry.json` | Stage-0 labels and Stage-1 criteria (25 tools, both shells incl. `bash`). |
-| `plugin/test/router-import-test.mjs`, `plugin/test/rank-sim.mjs`, `plugin/test/router-e2e-test.mjs`, `plugin/test/restrict-scope-test.mjs`, `plugin/test/router-storm-test.mjs`, `plugin/test/midstep-defer-test.mjs` | The six test suites (see [Tests](#tests)). |
+| `plugin/test/` | Eight suites: seven endpoint-free ones via `npm test`, plus `router-e2e-test.mjs` behind `npm run test:e2e` (see [Tests](#tests)). |
 
 ## Tests
 
 From the package directory (`plugin/`):
 
 ```sh
-npm test               # import shape, ranking sim, deny-set, storm lifecycle, boundary deferral
+npm test               # seven endpoint-free suites (shape, rank, deny-set, storm,
+                       # mid-step boundary, legacy request bodies, preset gate)
 npm run test:e2e       # full flow: arm/deny-set/live reveal — needs the decision endpoint at 127.0.0.1:8081
 ```
 
@@ -159,9 +171,11 @@ node test/router-e2e-test.mjs       # full flow: arm/deny-set/live reveal — ne
 node test/restrict-scope-test.mjs   # deny-set vs the global registry (agent-scoped + empty-deny cases)
 node test/router-storm-test.mjs     # mask lifecycle, no endpoint: no tools/change listener, step-boundary reconcile
 node test/midstep-defer-test.mjs    # 1.3.0 boundary rule: boot-adopt, parked hide, seed during the window
+node test/legacy-bodies-test.mjs    # byte-identity of Stage-1 request bodies vs the pinned fixture
+node test/preset-gate-test.mjs      # 1.3.1: no-prefill gate on adopt + release on preset switch
 ```
 
-`npm test` runs the five endpoint-free suites; `router-e2e-test.mjs` needs a
+`npm test` runs the seven endpoint-free suites; `router-e2e-test.mjs` needs a
 live decision endpoint and is kept behind `npm run test:e2e`.
 
 `router-e2e-test.mjs` uses a stub DSH context that emits `tools/change`
@@ -196,6 +210,17 @@ hide until `step/end`, so during that step advertised == callable (no
 `unknown tool` on a tool the header promised); a tool called during that
 un-masked window survives the parked arm via the log seed; and reveals still
 re-arm immediately mid-turn.
+
+`legacy-bodies-test.mjs` needs no endpoint. It captures five Stage-1 request
+bodies and pins them byte-for-byte to `test-fixtures/legacy-bodies.json`, so
+the `decision.js` extraction and registry criterion edits cannot silently
+change what the decision model receives.
+
+`preset-gate-test.mjs` needs no endpoint. It pins the 1.3.1 fix: `adopt()`
+skips agents whose composed preset is not `no-prefill` (registry predicate or
+session cache), and both `agent-preset/selected` and the `session/event`
+variant lift the deny layer when a session switches to another preset. An
+agent whose preset cannot be determined keeps the legacy behaviour.
 
 ## Notes
 
@@ -305,6 +330,25 @@ The rule now enforced (and tested):
    of being re-hidden (the `unknown tool` → `find_tool` → full-context retry
    loop the 2026-10-28 incident burned 419,672 tokens on).
 
-The subscription set is back up to four events and still **not** `tools/change`:
-`agent/created`, `agent/pre-step`, `session/event` (boundaries, read-only), and
-`agent/disposed` (drops the record and its restriction with the agent).
+The subscription set is five events and still **not** `tools/change`:
+`agent/created`, `agent/pre-step`, `session/event` (boundaries, read-only),
+`agent/disposed` (drops the record and its restriction with the agent), and
+`agent-preset/selected` (releases the mask when a session leaves `no-prefill`).
+
+## Keep the no-prefill mask inside its preset (v1.3.1)
+
+The router is mounted only in the `no-prefill` preset, but three adopt paths
+(boot-adopt, the `find_tool` self-heal and the `agent/pre-step` self-heal) used
+to mask **every** live agent. A standard session could lose 13 tools —
+including `find_tool` itself — and a session that passed through no-prefill
+kept the deny layer even after switching to standard.
+
+`adopt()` now resolves the composed preset (the registry's `composedPreset()`
+predicate, with the session cache as fallback) and refuses to mask an agent
+whose preset is not `no-prefill`; the skip is logged as
+`adopt skipped <agent> preset=standard is not no-prefill`. A new
+`agent-preset/selected` listener (plus the equivalent `session/event` entry)
+lifts the deny layer on any switch away from no-prefill, logging
+`released mask for <agent> (preset switched to standard)`. When no host API can
+name a preset, the legacy behaviour is preserved. `test/preset-gate-test.mjs`
+covers every path.
