@@ -4,9 +4,7 @@ Lazy tool discovery for DSH: hides every tool schema from the model's prefill
 and reveals exactly one tool on demand through a **decision model API**.
 
 - **Prefill cost:** one small `find_tool` schema instead of every mounted tool
-  (26 schemas on a default Standard profile in the original measurement — see
-  [Why?](#why); that figure dates from DSH 0.2.1-rc.3 and has not been
-  re-measured on 0.2.2-rc.1, where the Standard surface is larger).
+  (33 schemas on the current Standard profile — see [Why?](#why)).
 - **Stage 0** — full-surface send: every mounted tool (≤ 24) carries a
   160-char criterion, ordered by a stopword-filtered lexical rank (the rank
   only bounds pathological mounts — d1-omni does not saturate as the choice
@@ -23,39 +21,41 @@ and reveals exactly one tool on demand through a **decision model API**.
 
 ## Why?
 
-Fresh session, first message, server-reported `usage.prompt_tokens` —
-the DSH **Standard preset** (the platform default) versus this plugin's
-`no-prefill` preset:
+Fresh sessions on the live server, first message `Hey`, first-turn prompt
+tokens from the session log (`usage.inputTokens`) — the DSH **Standard preset**
+versus this plugin's `no-prefill` preset. Measured 2026-11-19 on DSH
+0.2.2-rc.1 / Moto G8 Power with the `mimo-v2.6-flash:free` model:
 
 | Cost before the first word | Standard | no-prefill |
 |---|---:|---:|
-| Prefill tokens | **6,559** | **283** |
-| System prompt | 5,816 chars | 372 chars |
-| Tool schemas shipped up front | **26 schemas (21,417 B)** | 1 schema (697 B) |
+| Prefill tokens | **7,919** | **523** |
+| System prompt | 5,795 chars | 1,170 chars |
+| Tool schemas shipped up front | **33 schemas (30,622 B)** | 1 schema (790 B) |
 
-> Measured on DSH 0.2.1-rc.3. Treat these as an illustration of the cost model,
-> not a current benchmark of the Standard profile, which now mounts more tools.
+The Standard request also reported 1,024 cached-prompt tokens
+(7,919 prompt + 17 completion = 8,960 total); the no-prefill request had no
+cache read (523 + 23 = 546).
 
 Standard makes the model ingest a 5.8k-character system prompt plus **every**
-mounted tool schema — 6,559 tokens — before it emits a single word, and pays
-it again on every subsequent turn. `no-prefill` ingests 283 tokens (**23×
-less**, 96% smaller prefill): a slim persona plus the single `find_tool`
-schema. On the measured backend that difference was ~40 s versus ~14 min of
-prompt evaluation for the first reply.
+mounted tool schema — 7,919 tokens — before it emits a single word, and pays
+it again on every subsequent turn. `no-prefill` ingests 523 tokens (**15×
+less**, 93% smaller prefill): a slim persona plus the single `find_tool`
+schema. The older ~40 s vs ~14 min local-backend figures came from a different
+model/hardware setup and are not comparable to this measurement.
 
 What that buys you:
 
 - **Latency** — time-to-first-word scales with the whole tool shelf today.
   Reveal-on-demand makes it scale with the tool you actually call.
-- **Context budget** — 6.5k tokens of standing preamble is 6.5k tokens you
-  don't have for code, conversation, and results. On a 32k window that's ~20%
+- **Context budget** — 7.9k tokens of standing preamble is 7.9k tokens you
+  don't have for code, conversation, and results. On a 32k window that's ~25%
   of the model's world spent before work starts.
-- **Reliability on small models** — a model reading 26 schemas behaves like a
-  model reading 26 instructions it must never violate. One schema at a time is
+- **Reliability on small models** — a model reading 33 schemas behaves like a
+  model reading 33 instructions it must never violate. One schema at a time is
   one schema to follow; the rest of the shelf doesn't exist for it.
-- **Pay for what you use** — a turn that calls no tool costs 283 tokens
-  instead of 6,559. A turn that calls one tool reveals that one schema once;
-  the other 25 are never sent.
+- **Pay for what you use** — a turn that calls no tool costs 523 tokens
+  instead of 7,919. A turn that calls one tool reveals that one schema once;
+  the other 32 are never sent.
 
 If a session ends up using most tools anyway, the gap narrows — but the unused
 half of the shelf is exactly what a default profile charges for from word one.
