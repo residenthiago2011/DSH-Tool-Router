@@ -21,10 +21,8 @@ and reveals exactly one tool on demand through a **decision model API**.
 
 ## Why?
 
-Fresh sessions on the live server, first message `Hey`, first-turn prompt
-tokens from the session log (`usage.inputTokens`) — the DSH **Standard preset**
-versus this plugin's `no-prefill` preset. Measured 2026-11-19 on DSH
-0.2.2-rc.1 / Moto G8 Power with the `mimo-v2.6-flash:free` model:
+Fresh session, first message, first-turn prompt tokens — the DSH **Standard
+preset** versus this plugin's `no-prefill` preset:
 
 | Cost before the first word | Standard | no-prefill |
 |---|---:|---:|
@@ -32,16 +30,11 @@ versus this plugin's `no-prefill` preset. Measured 2026-11-19 on DSH
 | System prompt | 5,795 chars | 1,170 chars |
 | Tool schemas shipped up front | **33 schemas (30,622 B)** | 1 schema (790 B) |
 
-The Standard request also reported 1,024 cached-prompt tokens
-(7,919 prompt + 17 completion = 8,960 total); the no-prefill request had no
-cache read (523 + 23 = 546).
-
 Standard makes the model ingest a 5.8k-character system prompt plus **every**
 mounted tool schema — 7,919 tokens — before it emits a single word, and pays
 it again on every subsequent turn. `no-prefill` ingests 523 tokens (**15×
 less**, 93% smaller prefill): a slim persona plus the single `find_tool`
-schema. The older ~40 s vs ~14 min local-backend figures came from a different
-model/hardware setup and are not comparable to this measurement.
+schema.
 
 What that buys you:
 

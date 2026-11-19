@@ -5,8 +5,7 @@ hides every tool schema from the model's prefill and reveals exactly one tool
 on demand through a **decision model API** (`POST /v1/systemone`).
 
 - **Prefill cost:** one small `find_tool` schema instead of every mounted tool
-  (measured 7,919 → 523 first-turn prompt tokens, Standard vs no-prefill,
-  2026-11-19 on DSH 0.2.2-rc.1).
+  (7,919 → 523 first-turn prompt tokens, Standard vs no-prefill).
 - **Stage 1** — one decision call returns the winning tool.
 - **Stage 2** — accept iff `confidence >= 0.70`; otherwise return a
   probability-ordered shortlist so the model can retry with an exact tool name.
